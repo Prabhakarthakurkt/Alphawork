@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: alphawork-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alphawork
+      POSTGRES_USER: alphawork
+      POSTGRES_PASSWORD: alphawork
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - alphawork_pgdata:/var/lib/postgresql/data
+    networks:
+      - alphawork-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphawork"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Service
+  backend:
+    build:
+      context: ../alphawork/backend
+      dockerfile: Dockerfile
+    container_name: alphawork-backend
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/alphawork
+      SPRING_DATASOURCE_USERNAME: alphawork
+      SPRING_DATASOURCE_PASSWORD: alphawork
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      JWT_SECRET: alphawork-secret-key-for-jwt-token-generation-must-be-long-enough-for-hs256
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - alphawork-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: alphawork-frontend
+    restart: unless-stopped
+    ports:
+      - "4200:4200"
+    depends_on:
+      - backend
+    networks:
+      - alphawork-network
+    environment:
+      BACKEND_URL: http://backend:8080
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: alphawork-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - alphawork-network
+
+volumes:
+  alphawork_pgdata:
+    driver: local
+
+networks:
+  alphawork-network:
+    driver: bridge
